@@ -1,5 +1,7 @@
 import pickle
 from collections import defaultdict
+import time  # TODO: for testing
+from sklearn.model_selection import train_test_split
 
 import numpy as np
 
@@ -57,6 +59,7 @@ class Baseline(object):
         :param words: the possible emissions (words).
         :param training_set: A training set of sequences of POS-tags and words.
         '''
+        start_time = time.time()
 
         self.words = words
         self.pos_tags = pos_tags
@@ -65,7 +68,56 @@ class Baseline(object):
         self.pos2i = {pos: i for (i, pos) in enumerate(pos_tags)}
         self.word2i = {word: i for (i, word) in enumerate(words)}
 
-        # TODO: YOUR CODE HERE
+        # get info from data
+        self.X = [training_set[i][1] for i in range(len(training_set))]
+        self.y = [training_set[i][0] for i in range(len(training_set))]
+
+        # get rare words, and convert the data to be without them
+        self.words_appearance_rate = {word: 0 for word in self.words}
+        for sentence in self.X:
+            for word in sentence:
+                self.words_appearance_rate[word] += 1
+        rare_words_set = {word for (word, count) in self.words_appearance_rate.items() if count <= 2}
+        self.words.add(RARE_WORD)
+        self.words = self.words - rare_words_set  # remove rare words
+        for sentence in self.X:
+            words_to_replace = {word for word in sentence if word in rare_words_set}
+            if len(words_to_replace):  # not empty
+                for (i, word) in enumerate(sentence):
+                    if word in words_to_replace:
+                        sentence[i] = RARE_WORD
+
+        # get word appearance rate and amount of words in total
+        self.words_appearance_rate = {word: 0 for word in self.words}
+        total_amount_of_words = 0
+        for sentence in self.X:
+            total_amount_of_words += len(sentence)
+            for word in sentence:
+                self.words_appearance_rate[word] += 1
+
+        # get pos tags appearance rate
+        self.pos_appearance = {pos: 0 for pos in self.pos_tags}
+        self.pos_appearance_prob = {pos: 0 for pos in self.pos_tags}
+        for sentence, pos_labels in zip(self.X, self.y):
+            for pos in pos_labels:
+                self.pos_appearance[pos] += 1
+        # mean div the pos tags appearance
+        for pos in self.pos_tags:
+            self.pos_appearance_prob[pos] = self.pos_appearance[pos] / total_amount_of_words
+
+        self.pos_by_word = {pos: defaultdict(int) for pos in self.pos_tags}
+        # get P(x|y) by getting all words for each pos
+        for i in range(len(self.X)):
+            sentence = self.X[i]
+            pos_of_sentence = self.y[i]
+            for j in range(len(sentence)):  # iterate over each word and it's corresponding pos
+                # we divide by the amount of words of the pos
+                self.pos_by_word[pos_of_sentence[j]][sentence[j]] += 1 / self.pos_appearance[pos_of_sentence[j]]
+
+        end_time = time.time()
+        print("Time taken:%0.4f seconds" % (end_time - start_time))
+        print("test")
+        pass
 
     def MAP(self, sentences):
         '''
@@ -74,8 +126,22 @@ class Baseline(object):
         :param sentences: iterable sequence of word sequences (sentences).
         :return: iterable sequence of PoS tag sequences.
         '''
+        # create tables
+        pos_predictions = []  # list of lists of pos
 
-        # TODO: YOUR CODE HERE
+        for sentence in sentences:
+            sentence_pos_prediction = []
+            for word in sentence:
+                if word not in self.words:
+                    word = RARE_WORD
+                max_prob, max_pos_index = 0, 0
+                for index, pos in enumerate(self.pos_tags):
+                    value = self.pos_appearance_prob[pos] * self.pos_by_word[pos][word]
+                    if value > max_prob:
+                        max_prob, max_pos_index = value, index
+                sentence_pos_prediction.append(self.pos_tags[max_pos_index])
+            pos_predictions.append(sentence_pos_prediction)
+        return pos_predictions
 
 
 def baseline_mle(training_set, model):
@@ -217,8 +283,8 @@ def get_data():
 
 def preprocess_data(data, words, pos):
     # append start and end
-    pos.append("START")
-    pos.append("END")
+    pos.append(START_STATE)
+    pos.append(END_STATE)
     # split to data and labels
     X = [data[i][1] for i in range(len(data))]
     y = [data[i][0] for i in range(len(data))]
@@ -237,4 +303,25 @@ def preprocess_data(data, words, pos):
 if __name__ == '__main__':
     data, words, pos = get_data()
     X, y, words_set, pos, rare_words_set = preprocess_data(data, words, pos)
-    print(rare_words_set)
+
+    # divide data
+    x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.9, random_state=42)
+    # small_set = data[:10000]
+    # words_in_small_set = {word for i in range(len(small_set)) for word in small_set[i][1]}
+    # baseline_model = Baseline(pos, words_in_small_set, small_set)
+
+    # TESTS -- all train data
+    new_data = [(y_train[i], x_train[i]) for i in range(len(x_train))]
+    words_in_new_data = {word for i in range(len(x_train)) for word in x_train[i]}
+    baseline_model = Baseline(pos, words_in_new_data, new_data)
+    pos_predictions = baseline_model.MAP(x_test)
+
+    avg_acc = 0
+    for sample_index in range(len(y_test)):
+        acc = 0
+        for pos_index in range(len(y_test[sample_index])):
+            if y_test[sample_index][pos_index] == pos_predictions[sample_index][pos_index]:
+                acc += 1
+        avg_acc += acc / len(y_test[sample_index])
+    print("accuracy:" + str(avg_acc / len(y_test)))
+    print("finished")
